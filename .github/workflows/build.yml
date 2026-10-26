@@ -28,11 +28,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-        
-      - name: Setup Yarn
-        run: |
-          corepack enable
-          corepack prepare yarn@4.18.1 --activate
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
