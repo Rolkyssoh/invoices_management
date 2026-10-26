@@ -4,6 +4,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -14,7 +17,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
-          - platform: macos-latest
+          - platform: macos-15
             target: aarch64-apple-darwin
           - platform: macos-15-intel
             target: x86_64-apple-darwin
@@ -28,6 +31,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: yarn
+
+      - name: Enable Corepack
+        run: corepack enable
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -47,13 +54,18 @@ jobs:
         run: yarn install --immutable
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pour signer/notariser les builds macOS, ajoutez ici les secrets
+          # APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+          # APPLE_ID, APPLE_PASSWORD et APPLE_TEAM_ID.
         with:
+          releaseDraft: true
           args: --target ${{ matrix.target }}
       
       - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: invoices_management-${{ matrix.target }}
