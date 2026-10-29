@@ -5,6 +5,7 @@ import type { LoggedInUser, LoginRequest, AuthStatus, InitialSetupResponse } fro
 interface AuthContextType {
   user: LoggedInUser | null;
   isAuthenticated: boolean;
+  isAdmin: boolean;
   isLoading: boolean;
   login: (credentials: LoginRequest) => Promise<{ success: boolean; message: string; isFirstLogin?: boolean }>;
   logout: () => Promise<void>;
@@ -108,6 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         isAuthenticated: !!user,
+        isAdmin: user?.role === "admin",
         isLoading,
         login,
         logout,

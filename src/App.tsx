@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
-import Sidebar from "./components/Sidebar";
+import Sidebar, { ADMIN_ONLY_TABS } from "./components/Sidebar";
+import { AccessDenied } from "./components/shared";
 import Dashboard from "./components/Dashboard";
 import Companies from "./components/Companies";
 import Clients from "./components/Clients";
@@ -14,9 +15,16 @@ import CompanySetup from "./components/CompanySetup";
 import "./App.css";
 
 function AppContent() {
-  const { isAuthenticated, isLoading, needsInitialSetup, initialSetupData, completeSetup, isFirstLogin, completeFirstLogin } = useAuth();
+  const { isAuthenticated, isLoading, needsInitialSetup, initialSetupData, completeSetup, isFirstLogin, completeFirstLogin, isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Send non-admins back to the dashboard if they land on an admin-only tab
+  useEffect(() => {
+    if (!isAdmin && ADMIN_ONLY_TABS.includes(activeTab)) {
+      setActiveTab("dashboard");
+    }
+  }, [isAdmin, activeTab]);
 
   // Show loading state while checking authentication
   if (isLoading) {
@@ -53,9 +61,9 @@ function AppContent() {
       case "dashboard":
         return <Dashboard />;
       case "companies":
-        return <Companies />;
+        return isAdmin ? <Companies /> : <AccessDenied />;
       case "users":
-        return <Users />;
+        return isAdmin ? <Users /> : <AccessDenied />;
       case "clients":
         return <Clients />;
       case "invoices":

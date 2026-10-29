@@ -26,17 +26,28 @@ interface SidebarComponentProps extends SidebarProps {
   userRole: string;
 }
 
-const menuItems = [
+interface MenuItem {
+  id: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  adminOnly?: boolean;
+}
+
+const menuItems: MenuItem[] = [
   { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
-  { id: "companies", label: "Entreprises", icon: Building2 },
-  { id: "users", label: "Utilisateurs", icon: Users },
+  { id: "companies", label: "Entreprises", icon: Building2, adminOnly: true },
+  { id: "users", label: "Utilisateurs", icon: Users, adminOnly: true },
   { id: "clients", label: "Clients", icon: UserCircle },
   { id: "invoices", label: "Factures", icon: FileText },
   { id: "invoice-items", label: "Lignes de facture", icon: ListTodo },
   { id: "payments", label: "Paiements", icon: CreditCard },
 ];
 
+export const ADMIN_ONLY_TABS = menuItems.filter((item) => item.adminOnly).map((item) => item.id);
+
 function SidebarContent({ activeTab, setActiveTab, isOpen, setIsOpen, onLogout, userName, userRole }: SidebarComponentProps) {
+  const visibleItems = menuItems.filter((item) => !item.adminOnly || userRole === "admin");
+
   return (
     <>
       {/* Mobile overlay */}
@@ -77,7 +88,7 @@ function SidebarContent({ activeTab, setActiveTab, isOpen, setIsOpen, onLogout, 
 
           {/* Navigation */}
           <nav className="flex-1 p-4 space-y-1 overflow-y-auto scrollbar-thin">
-            {menuItems.map((item) => {
+            {visibleItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
               return (

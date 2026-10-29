@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Building2, Users, UserCircle, FileText, CreditCard, TrendingUp, TrendingDown } from "lucide-react";
 import { api } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
-import type { Company, Invoice } from "../types";
+import type { Company, Invoice, User } from "../types";
 import { formatCurrency } from "../types";
 
 interface StatCardProps {
@@ -41,7 +41,7 @@ function StatCard({ title, value, icon: Icon, trend, trendValue, color }: StatCa
 }
 
 export default function Dashboard() {
-  const { companyId } = useAuth();
+  const { companyId, isAdmin } = useAuth();
   const [stats, setStats] = useState({
     companies: 0,
     users: 0,
@@ -58,7 +58,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadDashboardData();
-  }, [companyId]);
+  }, [companyId, isAdmin]);
 
   const loadDashboardData = async () => {
     if (!companyId) return;
@@ -67,7 +67,7 @@ export default function Dashboard() {
       setIsLoading(true);
       const [_companies, users, clients, invoices, payments] = await Promise.all([
         api.companies.getAll(),
-        api.users.getAll(),
+        isAdmin ? api.users.getAll() : Promise.resolve<User[]>([]),
         api.clients.getAll(),
         api.invoices.getAll(),
         api.payments.getAll(),
@@ -129,19 +129,23 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Grid - First Row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-        <StatCard
-          title="Entreprises"
-          value={stats.companies}
-          icon={Building2}
-          color="bg-blue-600"
-        />
-        <StatCard
-          title="Utilisateurs"
-          value={stats.users}
-          icon={Users}
-          color="bg-purple-600"
-        />
+      <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 ${isAdmin ? "xl:grid-cols-5" : "xl:grid-cols-3"}`}>
+        {isAdmin && (
+          <>
+            <StatCard
+              title="Entreprises"
+              value={stats.companies}
+              icon={Building2}
+              color="bg-blue-600"
+            />
+            <StatCard
+              title="Utilisateurs"
+              value={stats.users}
+              icon={Users}
+              color="bg-purple-600"
+            />
+          </>
+        )}
         <StatCard
           title="Clients"
           value={stats.clients}

@@ -22,6 +22,27 @@ pub struct SessionState {
     current_user: Mutex<Option<LoggedInUser>>,
 }
 
+// ============ ACCESS CONTROL HELPERS ============
+
+/// Returns the currently authenticated user, or an error if there is no session.
+async fn require_authenticated_user(session: &State<'_, SessionState>) -> Result<LoggedInUser, String> {
+    let current_user = session.current_user.lock().await;
+    current_user
+        .clone()
+        .ok_or_else(|| "Non authentifié".to_string())
+}
+
+/// Guarantees the caller is an administrator.
+/// The Companies and Users modules are reserved for admins on the frontend, so they
+/// must be locked down here too: the IPC layer is reachable whatever the UI shows.
+async fn require_admin(session: &State<'_, SessionState>) -> Result<LoggedInUser, String> {
+    let user = require_authenticated_user(session).await?;
+    if user.role != "admin" {
+        return Err("Accès refusé : action réservée aux administrateurs".to_string());
+    }
+    Ok(user)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoggedInUser {
     pub id: uuid::Uuid,
@@ -305,8 +326,11 @@ pub struct UpdatePaymentRequest {
 #[tauri::command]
 async fn create_company(
     state: State<'_, AppState>,
+    session: State<'_, SessionState>,
     request: CreateCompanyRequest,
 ) -> Result<Company, String> {
+    require_admin(&session).await?;
+
     let company = Company {
         id: uuid::Uuid::new_v4(),
         name: request.name,
@@ -333,19 +357,40 @@ async fn create_company(
 }
 
 #[tauri::command]
-async fn get_all_companies(state: State<'_, AppState>) -> Result<Vec<Company>, String> {
+async fn get_all_companies(
+    state: State<'_, AppState>,
+    session: State<'_, SessionState>,
+) -> Result<Vec<Company>, String> {
+    let current_user = require_authenticated_user(&session).await?;
     let db = state.db.lock().await;
-    db.get_all_companies()
+
+    if current_user.role == "admin" {
+        return db.get_all_companies()
+            .await
+            .map_err(|e| e.to_string());
+    }
+
+    // Non-admins only ever see their own company
+    Ok(db.get_company_by_id(current_user.company_id)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .collect())
 }
 
 #[tauri::command]
 async fn get_company_by_id(
     state: State<'_, AppState>,
+    session: State<'_, SessionState>,
     id: String,
 ) -> Result<Option<Company>, String> {
+    let current_user = require_authenticated_user(&session).await?;
     let company_id = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
+
+    if current_user.role != "admin" && company_id != current_user.company_id {
+        return Err("Accès refusé : vous ne pouvez consulter que votre entreprise".to_string());
+    }
+
     let db = state.db.lock().await;
     db.get_company_by_id(company_id)
         .await
@@ -355,9 +400,12 @@ async fn get_company_by_id(
 #[tauri::command]
 async fn update_company(
     state: State<'_, AppState>,
+    session: State<'_, SessionState>,
     id: String,
     request: UpdateCompanyRequest,
 ) -> Result<Company, String> {
+    require_admin(&session).await?;
+
     let company_id = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
     let company = Company {
         id: company_id,
@@ -385,7 +433,13 @@ async fn update_company(
 }
 
 #[tauri::command]
-async fn delete_company(state: State<'_, AppState>, id: String) -> Result<bool, String> {
+async fn delete_company(
+    state: State<'_, AppState>,
+    session: State<'_, SessionState>,
+    id: String,
+) -> Result<bool, String> {
+    require_admin(&session).await?;
+
     let company_id = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
     let db = state.db.lock().await;
     db.delete_company(company_id)
@@ -396,9 +450,12 @@ async fn delete_company(state: State<'_, AppState>, id: String) -> Result<bool, 
 #[tauri::command]
 async fn upload_company_logo(
     app_handle: tauri::AppHandle,
+    session: State<'_, SessionState>,
     company_id: String,
     image_base64: String,
 ) -> Result<String, String> {
+    require_admin(&session).await?;
+
     // Decode base64 image
     let image_data = base64::Engine::decode(
         &base64::engine::general_purpose::STANDARD,
@@ -459,8 +516,11 @@ async fn get_company_logo_base64(logo_path: String) -> Result<String, String> {
 #[tauri::command]
 async fn create_user(
     state: State<'_, AppState>,
+    session: State<'_, SessionState>,
     request: CreateUserRequest,
 ) -> Result<User, String> {
+    require_admin(&session).await?;
+
     let password_hash = hash_password(&request.password_hash)?;
     
     let user = User {
@@ -482,31 +542,58 @@ async fn create_user(
 }
 
 #[tauri::command]
-async fn get_all_users(state: State<'_, AppState>) -> Result<Vec<User>, String> {
+async fn get_all_users(
+    state: State<'_, AppState>,
+    session: State<'_, SessionState>,
+) -> Result<Vec<User>, String> {
+    let current_user = require_authenticated_user(&session).await?;
     let db = state.db.lock().await;
-    db.get_all_users()
+    let users = db.get_all_users()
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    if current_user.role == "admin" {
+        return Ok(users);
+    }
+
+    // Non-admins only see the users of their own company
+    Ok(users
+        .into_iter()
+        .filter(|u| u.company_id == current_user.company_id)
+        .collect())
 }
 
 #[tauri::command]
 async fn get_user_by_id(
     state: State<'_, AppState>,
+    session: State<'_, SessionState>,
     id: String,
 ) -> Result<Option<User>, String> {
+    let current_user = require_authenticated_user(&session).await?;
     let user_id = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
     let db = state.db.lock().await;
-    db.get_user_by_id(user_id)
+    let user = db.get_user_by_id(user_id)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    if current_user.role != "admin"
+        && user.as_ref().is_some_and(|u| u.company_id != current_user.company_id)
+    {
+        return Err("Accès refusé : vous ne pouvez consulter que les utilisateurs de votre entreprise".to_string());
+    }
+
+    Ok(user)
 }
 
 #[tauri::command]
 async fn update_user(
     state: State<'_, AppState>,
+    session: State<'_, SessionState>,
     id: String,
     request: UpdateUserRequest,
 ) -> Result<User, String> {
+    require_admin(&session).await?;
+
     let user_id = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
     
     // Get existing user to preserve password if not changed
@@ -541,7 +628,13 @@ async fn update_user(
 }
 
 #[tauri::command]
-async fn delete_user(state: State<'_, AppState>, id: String) -> Result<bool, String> {
+async fn delete_user(
+    state: State<'_, AppState>,
+    session: State<'_, SessionState>,
+    id: String,
+) -> Result<bool, String> {
+    require_admin(&session).await?;
+
     let user_id = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
     let db = state.db.lock().await;
     db.delete_user(user_id)
@@ -1090,8 +1183,17 @@ async fn initialize_first_setup(state: &AppState) -> Result<(Company, User), Str
 #[tauri::command]
 async fn update_default_user(
     state: State<'_, AppState>,
+    session: State<'_, SessionState>,
     request: UpdateDefaultUserRequest,
 ) -> Result<bool, String> {
+    // This command rewrites the default admin account, so it must not be usable by
+    // a logged-in manager/user as a way to take over the administrator account.
+    if let Some(current_user) = session.current_user.lock().await.clone() {
+        if current_user.role != "admin" {
+            return Err("Accès refusé : action réservée aux administrateurs".to_string());
+        }
+    }
+
     let db = state.db.lock().await;
     
     // Get the first user (the default admin)
